@@ -13,9 +13,11 @@
   <div id="left-panel">
     <div class="panel" id="stats-panel">
       <h3>Status</h3>
+      <div class="stat-row"><span class="stat-label">Level</span><span class="stat-value" id="level-name" style="font-size:10px">—</span></div>
       <div class="stat-row"><span class="stat-label">Lives</span><span class="stat-value hearts" id="lives">&#9829;&#9829;&#9829;</span></div>
       <div class="stat-row"><span class="stat-label">Turn</span><span class="stat-value" id="turn">0</span></div>
       <div class="stat-row"><span class="stat-label">Monsters</span><span class="stat-value" id="monsters-left">?</span></div>
+      <div class="stat-row"><span class="stat-label">Turns Left</span><span class="stat-value" id="turns-left" style="color:#ff8844">&mdash;</span></div>
       <div class="stat-row"><span class="stat-label">Sensor</span><span class="stat-value" id="sensor-reading">&mdash;</span></div>
       <div id="scan-bar"><div id="scan-fill"></div></div>
     </div>
@@ -37,6 +39,7 @@
         <span class="legend-item"><span class="legend-dot" style="background:#00ffbb"></span> You</span>
         <span class="legend-item"><span class="legend-dot" style="background:#ffcc00"></span> Exit</span>
         <span class="legend-item"><span class="legend-dot" style="background:#ff3344"></span> Monster</span>
+        <span class="legend-item"><span class="legend-dot" style="background:#ff8844"></span> MLE</span>
       </div>
       <br>
       <kbd>&uarr;</kbd><kbd>&darr;</kbd><kbd>&larr;</kbd><kbd>&rarr;</kbd> Move<br>
@@ -120,11 +123,12 @@
    ============================================================ */
 import { CANVAS_PX } from './math.js';
 import { audio } from './audio.js';
-import { GameState } from './gamestate.js';
+import { GameState, LEVELS } from './gamestate.js';
 import { drawGame } from './renderer.js';
 import { drawBeliefMap, drawEntropy, drawBeta, drawEV, drawInfoGain,
          drawMarkovMatrix, drawPostGame, updateUI } from './panels.js';
 import { Tutorial } from './tutorial.js';
+import { showSummary } from './summary.js';
 
 const game = new GameState();
 const tutorial = new Tutorial(game);
@@ -135,14 +139,14 @@ gCanvas.height = CANVAS_PX;
 const gCtx = gCanvas.getContext('2d');
 
 // --- Input ---
+const moveMap = {
+  'ArrowUp': [-1, 0], 'ArrowDown': [1, 0], 'ArrowLeft': [0, -1], 'ArrowRight': [0, 1],
+  'w': [-1, 0], 's': [1, 0], 'a': [0, -1], 'd': [0, 1],
+  'W': [-1, 0], 'S': [1, 0], 'A': [0, -1], 'D': [0, 1],
+};
+
 function handleKey(e) {
   if (game.phase === 'TITLE') return;
-
-  const moveMap = {
-    'ArrowUp': [-1, 0], 'ArrowDown': [1, 0], 'ArrowLeft': [0, -1], 'ArrowRight': [0, 1],
-    'w': [-1, 0], 's': [1, 0], 'a': [0, -1], 'd': [0, 1],
-    'W': [-1, 0], 'S': [1, 0], 'A': [0, -1], 'D': [0, 1],
-  };
 
   if (e.key === 'm' || e.key === 'M') {
     audio.muted = !audio.muted;
@@ -153,19 +157,16 @@ function handleKey(e) {
 
   if (e.key === 'r' || e.key === 'R') {
     e.preventDefault();
-    restartGame();
+    restartLevel();
     return;
   }
 
-  // Tutorial mode: only allow expected actions
+  // Tutorial mode
   if (tutorial.active) {
     if (e.key === ' ' || e.key === 'Spacebar') {
       e.preventDefault();
-      if (tutorial.onAction('scan')) {
-        game.doTurn(0, 0, true);
-      }
+      if (tutorial.onAction('scan')) game.doTurn(0, 0, true);
     }
-    // Block movement during tutorial wait steps
     return;
   }
 
@@ -176,45 +177,33 @@ function handleKey(e) {
     game.doTurn(0, 0, true);
   } else if (moveMap[e.key]) {
     e.preventDefault();
-    const [dr, dc] = moveMap[e.key];
-    game.doTurn(dr, dc);
+    game.doTurn(...moveMap[e.key]);
   } else {
     return;
   }
 
   if (game.phase === 'WON' || game.phase === 'LOST') {
-    showGameOver();
+    showSummary(game);
+    // Wire up buttons after summary renders
+    requestAnimationFrame(() => {
+      const nextBtn = document.getElementById('next-level-btn');
+      if (nextBtn) nextBtn.onclick = () => nextLevel();
+      const retryBtn = document.getElementById('retry-btn');
+      if (retryBtn) retryBtn.onclick = () => restartLevel();
+    });
   }
 }
 document.addEventListener('keydown', handleKey);
 
 // --- Overlays ---
-function showOverlay(content) {
-  const overlay = document.getElementById('overlay');
-  overlay.innerHTML = content;
-  overlay.classList.remove('hidden');
-}
-
 function hideOverlay() {
   document.getElementById('overlay').classList.add('hidden');
-}
-
-function showGameOver() {
-  const isWin = game.phase === 'WON';
-  showOverlay(`
-    <h2 style="color:${isWin ? '#66ddff' : '#ff4466'}">${isWin ? 'You Escaped!' : 'Defeated...'}</h2>
-    <p>${isWin
-      ? `You navigated the dungeon in ${game.turn} turns using Bayesian inference!`
-      : `The monsters got you after ${game.turn} turns.`}</p>
-    <p style="font-size:11px;color:#556677">Check the Post-Game Analysis panel for Bootstrap CI and CLT results.</p>
-    <button class="start-btn" onclick="document.dispatchEvent(new CustomEvent('restart'))">Play Again</button>
-  `);
-  drawPostGame(game);
 }
 
 // --- Game control ---
 function startGame(withTutorial) {
   audio.init();
+  game.currentLevel = 0;
   game.reset();
   hideOverlay();
   if (withTutorial) {
@@ -227,13 +216,21 @@ function startGame(withTutorial) {
   }
 }
 
-function restartGame() {
+function restartLevel() {
   audio.stopMusic();
   game.reset();
   game.phase = 'PLAYING';
   hideOverlay();
-  document.getElementById('postgame-canvas').classList.add('hidden');
-  document.getElementById('postgame-stats').textContent = 'Complete a game to see analysis.';
+  game.doTurn(0, 0, true);
+  audio.init();
+  audio.startMusic();
+}
+
+function nextLevel() {
+  audio.stopMusic();
+  game.nextLevel();
+  game.phase = 'PLAYING';
+  hideOverlay();
   game.doTurn(0, 0, true);
   audio.init();
   audio.startMusic();
@@ -241,7 +238,6 @@ function restartGame() {
 
 document.getElementById('start-btn').addEventListener('click', () => startGame(false));
 document.getElementById('tutorial-btn').addEventListener('click', () => startGame(true));
-document.addEventListener('restart', restartGame);
 document.addEventListener('keydown', (e) => {
   if (game.phase === 'TITLE' && (e.key === 'Enter' || e.key === ' ')) {
     e.preventDefault();
@@ -249,25 +245,29 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
+// --- Level display ---
+function updateLevelDisplay() {
+  const lvl = LEVELS[game.currentLevel] || LEVELS[LEVELS.length - 1];
+  document.getElementById('level-name').textContent = `Lv.${game.currentLevel + 1}: ${lvl.name}`;
+}
+
 // --- Animation loop ---
 let frameCount = 0;
 function animLoop() {
   frameCount++;
 
-  // Decay animations
   if (game.sonarAnim > 0) game.sonarAnim -= 0.025;
   if (game.shakeFrames > 0) game.shakeFrames--;
   game.updateParticles();
 
-  // Render
   drawGame(gCtx, game);
   drawBeliefMap(game);
   drawEntropy(game);
   drawBeta(game);
   drawEV(game);
   updateUI(game);
+  updateLevelDisplay();
 
-  // Throttle expensive panels
   if (frameCount % 8 === 0) drawInfoGain(game);
   if (frameCount % 4 === 0) drawMarkovMatrix(audio.getState());
 

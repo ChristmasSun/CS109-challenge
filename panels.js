@@ -326,4 +326,12 @@ export function updateUI(game) {
     game.lastReading !== null ? `d\u2248${game.lastReading.toFixed(1)}` : '\u2014';
   const reliability = game.betaA / (game.betaA + game.betaB);
   document.getElementById('scan-fill').style.width = `${reliability * 100}%`;
+
+  // Turns remaining
+  const remaining = game.turnsRemaining();
+  const tlEl = document.getElementById('turns-left');
+  if (tlEl) {
+    tlEl.textContent = remaining === Infinity ? '\u221e' : remaining;
+    tlEl.style.color = remaining <= 10 ? '#ff3344' : remaining <= 20 ? '#ff8844' : '#aaccff';
+  }
 }

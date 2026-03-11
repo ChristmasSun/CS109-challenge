@@ -8,14 +8,26 @@ import {
 } from './math.js';
 import { audio } from './audio.js';
 
-const MOTION_PROB = 0.35;
-const BASE_SENSOR_SIGMA = 2.0;
+// ── Level definitions ──────────────────────────────────────────
+export const LEVELS = [
+  { name: 'Training Ground', monsters: 4,  sensorSigma: 2.0, motionProb: 0.35, walls: 18, turnLimit: 80,  hunterProb: 0    },
+  { name: 'The Depths',      monsters: 6,  sensorSigma: 2.5, motionProb: 0.45, walls: 22, turnLimit: 70,  hunterProb: 0.15 },
+  { name: 'Dark Labyrinth',  monsters: 8,  sensorSigma: 3.0, motionProb: 0.55, walls: 28, turnLimit: 65,  hunterProb: 0.25 },
+  { name: 'The Abyss',       monsters: 10, sensorSigma: 3.5, motionProb: 0.65, walls: 30, turnLimit: 55,  hunterProb: 0.35 },
+  { name: 'Nightmare',       monsters: 13, sensorSigma: 4.0, motionProb: 0.75, walls: 35, turnLimit: 50,  hunterProb: 0.50 },
+];
+
 const SCAN_SIGMA_MULT = 0.5;
 
 export class GameState {
-  constructor() { this.reset(); }
+  constructor() {
+    this.currentLevel = 0;
+    this.reset();
+  }
 
   reset() {
+    const lvl = LEVELS[this.currentLevel] || LEVELS[LEVELS.length - 1];
+
     this.phase = 'TITLE';   // TITLE, TUTORIAL, PLAYING, WON, LOST
     this.lives = 3;
     this.turn = 0;
@@ -32,6 +44,21 @@ export class GameState {
     this.lastReading = null;
     this.lastTrueNearest = null;
     this.motionKernel = makeMotionKernel(1.2);
+    this.levelConfig = lvl;
+
+    // MLE tracking
+    this.mleEstimate = { r: GRID / 2, c: GRID / 2 };
+    this.mleErrors = [];
+    this.bayesErrors = [];
+
+    // Scoring
+    this.moveCount = 0;
+    this.scanCount = 0;
+    this.evFollowCount = 0;
+    this.monstersDefeated = 0;
+
+    // Turn history for replay
+    this.history = [];
 
     // Animation state
     this.sonarAnim = 0;
@@ -49,9 +76,15 @@ export class GameState {
     this._revealAround(this.player.r, this.player.c);
   }
 
+  nextLevel() {
+    if (this.currentLevel < LEVELS.length - 1) this.currentLevel++;
+    this.reset();
+  }
+
   _generateDungeon() {
     this.walls.clear();
     this.monsters = [];
+    const lvl = this.levelConfig;
 
     // Guaranteed path via biased random walk
     const path = new Set();
@@ -81,8 +114,8 @@ export class GameState {
       this.walls.add(i * GRID + (GRID - 1));
     }
 
-    // Interior walls
-    const nWalls = 20 + Math.floor(Math.random() * 15);
+    // Interior walls (scaled by level)
+    const nWalls = lvl.walls + Math.floor(Math.random() * 10);
     for (let w = 0; w < nWalls; w++) {
       const wr = 1 + Math.floor(Math.random() * (GRID - 2));
       const wc = 1 + Math.floor(Math.random() * (GRID - 2));
@@ -94,8 +127,8 @@ export class GameState {
       }
     }
 
-    // Place monsters
-    for (let m = 0; m < 4; m++) {
+    // Place monsters (scaled by level)
+    for (let m = 0; m < lvl.monsters; m++) {
       let mr, mc, tries = 0;
       do {
         mr = 1 + Math.floor(Math.random() * (GRID - 2));
@@ -140,10 +173,32 @@ export class GameState {
     return minD;
   }
 
+  // MAP estimate from belief grid
+  bayesEstimate() {
+    let maxIdx = 0;
+    for (let i = 1; i < CELLS; i++) {
+      if (this.belief[i] > this.belief[maxIdx]) maxIdx = i;
+    }
+    return { r: Math.floor(maxIdx / GRID), c: maxIdx % GRID };
+  }
+
+  // MLE estimate: argmax of likelihood from current reading only (no prior)
+  _computeMLE(reading, sigma) {
+    let bestIdx = 0, bestL = -1;
+    for (let i = 0; i < CELLS; i++) {
+      if (this.walls.has(i)) continue;
+      const r = Math.floor(i / GRID), c = i % GRID;
+      const d = dist(this.player.r, this.player.c, r, c);
+      const l = gaussianPDF(reading, d, sigma);
+      if (l > bestL) { bestL = l; bestIdx = i; }
+    }
+    return { r: Math.floor(bestIdx / GRID), c: bestIdx % GRID };
+  }
+
   // --- Sonar ping (observation) ---
   sonarPing(sigmaMultiplier = 1) {
     const trueDist = this.nearestMonsterDist();
-    const sigma = BASE_SENSOR_SIGMA * sigmaMultiplier *
+    const sigma = this.levelConfig.sensorSigma * sigmaMultiplier *
                   (1.1 - this.betaA / (this.betaA + this.betaB) * 0.3);
     const reading = Math.max(0, trueDist + randn() * sigma);
     this.lastReading = reading;
@@ -175,12 +230,19 @@ export class GameState {
 
   // --- Bayesian Update step ---
   update(reading, sigma) {
+    // Store pre-update belief for replay
+    this._lastPriorBelief = new Float64Array(this.belief);
+
+    // Compute and store likelihood
+    this._lastLikelihood = new Float64Array(CELLS);
     for (let r = 0; r < GRID; r++) {
       for (let c = 0; c < GRID; c++) {
         const idx = r * GRID + c;
         if (this.walls.has(idx)) continue;
         const d = dist(this.player.r, this.player.c, r, c);
-        this.belief[idx] *= gaussianPDF(reading, d, sigma);
+        const l = gaussianPDF(reading, d, sigma);
+        this._lastLikelihood[idx] = l;
+        this.belief[idx] *= l;
       }
     }
     // Suppress visited cells with no monster
@@ -194,9 +256,22 @@ export class GameState {
   }
 
   moveMonsters() {
+    const prob = this.levelConfig.motionProb;
+    const hunterProb = this.levelConfig.hunterProb || 0;
     for (const m of this.monsters) {
-      if (Math.random() < MOTION_PROB) {
-        const dirs = [[0, 1], [0, -1], [1, 0], [-1, 0]].sort(() => Math.random() - 0.5);
+      if (Math.random() < prob) {
+        let dirs;
+        if (Math.random() < hunterProb) {
+          // Hunter behavior: bias movement toward the player
+          dirs = [[0, 1], [0, -1], [1, 0], [-1, 0]];
+          dirs.sort((a, b) => {
+            const da = dist(m.r + a[0], m.c + a[1], this.player.r, this.player.c);
+            const db = dist(m.r + b[0], m.c + b[1], this.player.r, this.player.c);
+            return da - db;  // prefer moves that get closer
+          });
+        } else {
+          dirs = [[0, 1], [0, -1], [1, 0], [-1, 0]].sort(() => Math.random() - 0.5);
+        }
         for (const [dr, dc] of dirs) {
           const nr = m.r + dr, nc = m.c + dc;
           if (!this.isWall(nr, nc) && !this.monsters.some(o => o !== m && o.r === nr && o.c === nc)) {
@@ -240,7 +315,7 @@ export class GameState {
         const r = Math.floor(i / GRID), c = i % GRID;
         expReading += this.belief[i] * dist(nr, nc, r, c);
       }
-      const sigma = BASE_SENSOR_SIGMA * sigmaMult;
+      const sigma = this.levelConfig.sensorSigma * sigmaMult;
       const simBelief = new Float64Array(this.belief);
       for (let r = 0; r < GRID; r++) {
         for (let c = 0; c < GRID; c++) {
@@ -253,19 +328,42 @@ export class GameState {
     return gains;
   }
 
-  // --- Spawn particles ---
+  // --- Scoring ---
+  computeScore() {
+    const lvlIdx = this.currentLevel;
+    const baseTurns = GRID * 2;
+    const turnScore = Math.max(0, 100 - Math.max(0, this.turn - baseTurns) * 1.5);
+    const liveScore = this.lives * 25;
+    const evRatio = this.moveCount > 0 ? this.evFollowCount / this.moveCount : 0;
+    const evScore = evRatio * 40;
+    const scanBonus = Math.min(15, this.scanCount * 3);
+    const raw = turnScore + liveScore + evScore + scanBonus;
+    const multiplier = 1 + lvlIdx * 0.25;
+    return Math.round(raw * multiplier);
+  }
+
+  getGrade(score) {
+    if (score >= 200) return 'S';
+    if (score >= 170) return 'A+';
+    if (score >= 145) return 'A';
+    if (score >= 125) return 'B+';
+    if (score >= 105) return 'B';
+    if (score >= 85)  return 'C+';
+    if (score >= 65)  return 'C';
+    if (score >= 40)  return 'D';
+    return 'F';
+  }
+
+  // --- Particles ---
   spawnSonarParticles() {
     const pr = this.player.r, pc = this.player.c;
     for (let i = 0; i < 10; i++) {
-      const angle = (i / 24) * Math.PI * 2 + (Math.random() - 0.5) * 0.2;
+      const angle = (i / 10) * Math.PI * 2 + (Math.random() - 0.5) * 0.3;
       const speed = 1.5 + Math.random() * 1.5;
       this.particles.push({
         x: pc, y: pr,
-        vx: Math.cos(angle) * speed,
-        vy: Math.sin(angle) * speed,
-        life: 1.0,
-        decay: 0.015 + Math.random() * 0.01,
-        color: 'sonar'
+        vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
+        life: 1.0, decay: 0.015 + Math.random() * 0.01, color: 'sonar'
       });
     }
   }
@@ -276,11 +374,8 @@ export class GameState {
       const speed = 1 + Math.random() * 2;
       this.particles.push({
         x: c, y: r,
-        vx: Math.cos(angle) * speed,
-        vy: Math.sin(angle) * speed,
-        life: 1.0,
-        decay: 0.03 + Math.random() * 0.02,
-        color: 'hit'
+        vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
+        life: 1.0, decay: 0.03 + Math.random() * 0.02, color: 'hit'
       });
     }
   }
@@ -295,9 +390,58 @@ export class GameState {
     }
   }
 
+  // --- Save turn snapshot for replay ---
+  _saveSnapshot(reading, sigma) {
+    // Find nearest monster for error tracking
+    let nearestR = Infinity, nearestC = 0, nearestDist = Infinity;
+    for (const m of this.monsters) {
+      const d = dist(this.player.r, this.player.c, m.r, m.c);
+      if (d < nearestDist) { nearestDist = d; nearestR = m.r; nearestC = m.c; }
+    }
+
+    const bayesEst = this.bayesEstimate();
+    const errBayes = this.monsters.length > 0
+      ? dist(bayesEst.r, bayesEst.c, nearestR, nearestC) : 0;
+    const errMLE = this.monsters.length > 0
+      ? dist(this.mleEstimate.r, this.mleEstimate.c, nearestR, nearestC) : 0;
+
+    this.bayesErrors.push(errBayes);
+    this.mleErrors.push(errMLE);
+
+    this.history.push({
+      turn: this.turn,
+      playerR: this.player.r,
+      playerC: this.player.c,
+      reading,
+      sigma,
+      entropy: this.entropyHistory[this.entropyHistory.length - 1],
+      bayesEst: { ...bayesEst },
+      mleEst: { ...this.mleEstimate },
+      errBayes,
+      errMLE,
+      priorBelief: this._lastPriorBelief ? new Float64Array(this._lastPriorBelief) : null,
+      likelihood: this._lastLikelihood ? new Float64Array(this._lastLikelihood) : null,
+      posteriorBelief: new Float64Array(this.belief),
+      monsters: this.monsters.map(m => ({ ...m })),
+    });
+  }
+
   // --- Execute a full turn ---
   doTurn(dr, dc, isScan = false) {
     if (this.phase !== 'PLAYING' && this.phase !== 'TUTORIAL') return;
+
+    // Track EV following for scoring
+    if (!isScan && (dr !== 0 || dc !== 0)) {
+      const ev = this.computeEV();
+      const dirName = dr === -1 ? 'up' : dr === 1 ? 'down' : dc === -1 ? 'left' : 'right';
+      const validEVs = Object.entries(ev).filter(([, v]) => v >= 0);
+      if (validEVs.length > 0) {
+        const safest = validEVs.reduce((a, b) => a[1] < b[1] ? a : b)[0];
+        if (dirName === safest) this.evFollowCount++;
+      }
+      this.moveCount++;
+    }
+    if (isScan) this.scanCount++;
 
     if (!isScan) {
       const nr = this.player.r + dr, nc = this.player.c + dc;
@@ -312,6 +456,7 @@ export class GameState {
       if (hitIdx >= 0) {
         this.spawnHitParticles(nr, nc);
         this.monsters.splice(hitIdx, 1);
+        this.monstersDefeated++;
         this.lives--;
         this.shakeFrames = 12;
         audio.hit();
@@ -329,21 +474,37 @@ export class GameState {
     this.turn++;
     this.moveMonsters();
 
-    // Bayesian cycle
+    // Bayesian cycle: predict → observe → update
     this.predict();
     const sigmaMult = isScan ? SCAN_SIGMA_MULT : 1;
     const { reading, sigma } = this.sonarPing(sigmaMult);
     this.update(reading, sigma);
 
+    // MLE estimate (current observation only, no prior)
+    this.mleEstimate = this._computeMLE(reading, sigma);
+
     this.entropyHistory.push(shannonEntropy(this.belief));
     this.sonarAnim = 1.0;
     this.spawnSonarParticles();
 
-    // Update music tension based on entropy
+    // Save snapshot for replay
+    this._saveSnapshot(reading, sigma);
+
+    // Update music tension
     if (this.entropyHistory.length > 0) {
       const maxEntropy = Math.log2(CELLS);
       const currentEntropy = this.entropyHistory[this.entropyHistory.length - 1];
       audio.setTension(currentEntropy / maxEntropy);
     }
+
+    // Turn limit
+    if (this.levelConfig.turnLimit && this.turn >= this.levelConfig.turnLimit) {
+      this.phase = 'LOST';
+      audio.stopMusic();
+    }
+  }
+
+  turnsRemaining() {
+    return this.levelConfig.turnLimit ? this.levelConfig.turnLimit - this.turn : Infinity;
   }
 }

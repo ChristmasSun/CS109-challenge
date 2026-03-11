@@ -186,3 +186,57 @@ body {
   from { border-color: #1a1a3a; box-shadow: none; }
   to { border-color: #66ddff; box-shadow: 0 0 12px #66ddff33; }
 }
+
+/* --- Summary / Level Complete Screen --- */
+#overlay {
+  overflow-y: auto;
+  max-height: 100%;
+}
+.summary-stat {
+  background: #0e1a2e;
+  border: 1px solid #1a2a44;
+  border-radius: 6px;
+  padding: 8px 14px;
+  text-align: center;
+  min-width: 80px;
+}
+.summary-label {
+  display: block;
+  font-size: 9px;
+  color: #556688;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 2px;
+}
+.summary-val {
+  display: block;
+  font-size: 16px;
+  color: #aaccff;
+  font-weight: bold;
+}
+.summary-details {
+  background: #0a1020;
+  border: 1px solid #1a2a44;
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin: 6px 0;
+  max-width: 520px;
+  width: 100%;
+  text-align: left;
+}
+.summary-details summary {
+  color: #6688bb;
+  font-size: 12px;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.summary-details canvas {
+  width: 100%;
+  margin-top: 8px;
+  border-radius: 4px;
+}
+.replay-stage-btn {
+  padding: 4px 12px !important;
+  font-size: 10px !important;
+}

@@ -161,6 +161,24 @@ export function drawGame(ctx, game) {
     ctx.stroke();
   }
 
+  // --- MLE estimate dot ---
+  if (game.mleEstimate && game.lastReading !== null) {
+    const mx = game.mleEstimate.c * S + S / 2;
+    const my = game.mleEstimate.r * S + S / 2;
+    ctx.strokeStyle = '#ff884488';
+    ctx.lineWidth = 2;
+    // Draw X shape
+    const sz = S * 0.2;
+    ctx.beginPath();
+    ctx.moveTo(mx - sz, my - sz); ctx.lineTo(mx + sz, my + sz);
+    ctx.moveTo(mx + sz, my - sz); ctx.lineTo(mx - sz, my + sz);
+    ctx.stroke();
+    ctx.fillStyle = '#ff884466';
+    ctx.font = '9px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('MLE', mx, my - S * 0.3);
+  }
+
   // --- Player (smooth position) ---
   {
     const px = game.playerRenderC * S + S / 2;
