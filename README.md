@@ -8,7 +8,7 @@ Thus, the probability is the gameplay. Players who understand and use the Bayesi
 
 ## How to Play
 
-put link here once i deploy this to vercel or wtv
+https://fog-of-war-game.vercel.app/
 
 ### Controls
 | Key | Action |
