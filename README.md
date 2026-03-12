@@ -221,7 +221,7 @@ The **mean of the Beta distribution** E[p] = α / (α + β) represents the estim
 
 ---
 
-### 7. Central Limit Theorem (Lecture 15)
+### 7. Central Limit Theorem
 
 **Where:** The Post-Game Analysis panel (after winning or losing).
 

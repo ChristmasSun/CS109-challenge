@@ -4,9 +4,9 @@
 
 const STEPS = [
   {
-    title: 'Welcome, Agent',
+    title: 'Welcome!',
     text: `You're trapped in a dungeon. <strong>Monsters</strong> hide in the fog.
-           Your only tool: a <strong>sonar sensor</strong> that estimates distance to the nearest monster — but it's noisy.`,
+           Your only tool is a <strong>sonar sensor</strong> that estimates distance to the nearest monster, but it's noisy.`,
     math: null,
     highlight: null,
     highlightCanvas: 'game-canvas',
@@ -15,7 +15,7 @@ const STEPS = [
   {
     title: 'Step 1: The Prior',
     text: `Before any observations, you have <strong>no idea</strong> where the monsters are.
-           Your belief is <strong>uniform</strong> — every cell is equally likely.
+           Your belief is <strong>uniform</strong>, meaning you think every cell is equally likely.
            Look at the Belief Map →`,
     math: 'P(monster at cell) = 1/N  for all open cells',
     highlight: 'belief-panel',
@@ -36,7 +36,7 @@ const STEPS = [
     title: 'Step 3: The Likelihood',
     text: `See the <strong style="color:#ff8855">ring</strong> on the heatmap? That's the <strong>likelihood function</strong>.
            Cells at distance \u2248 <strong style="color:#66ddff">${'{reading}'}</strong> from you are most probable.
-           <br><br>Notice the orange <strong style="color:#ff8844">MLE \u2717</strong> marker — that's the
+           <br><br>Notice the orange <strong style="color:#ff8844">MLE \u2717</strong> marker. That's the
            maximum likelihood estimate using <em>only</em> this reading, no history.`,
     math: 'L(cell) = exp(&minus;|d(cell) &minus; z|\u00b2 / 2\u03c3\u00b2)',
     highlight: null,
@@ -46,9 +46,9 @@ const STEPS = [
   {
     title: 'Step 4: Bayes\' Theorem!',
     text: `The <strong style="color:#44aaff">posterior</strong> = prior \u00d7 likelihood, normalized.
-           This is the core of Bayesian inference: combining your <em>prior belief</em>
+           This is Bayes inference! It combines your <em>prior belief</em>
            with <em>new evidence</em> to get an updated belief.
-           <br><br>Watch the Belief Map update — it's sharper than either the prior or likelihood alone!`,
+           <br><br>Watch the Belief Map update as it's sharper than either the prior or likelihood alone.`,
     math: 'P(cell | z) \u221d P(cell) \u00d7 L(z | cell)',
     highlight: 'belief-panel',
     highlightCanvas: null,
@@ -67,11 +67,11 @@ const STEPS = [
   {
     title: 'Step 6: Your Instruments',
     text: `Your side panels are your instruments:
-           <br>\u2022 <strong style="color:#ff66aa">Entropy</strong> — total uncertainty in bits. Watch it drop as you learn!
-           <br>\u2022 <strong style="color:#66aaff">Beta Distribution</strong> — tracks sensor reliability over time
-           <br>\u2022 <strong style="color:#44dd88">EV Arrows</strong> — expected danger per direction. Follow the green!
-           <br>\u2022 <strong style="color:#88aadd">Info Gain</strong> — should you scan or move?
-           <br>\u2022 <strong style="color:#88aadd">Music</strong> — Markov chain melody, tenser when you're uncertain`,
+           <br>\u2022 <strong style="color:#ff66aa">Entropy</strong> - total uncertainty in bits. Watch it drop as you learn!
+           <br>\u2022 <strong style="color:#66aaff">Beta Distribution</strong> - tracks sensor reliability over time
+           <br>\u2022 <strong style="color:#44dd88">EV Arrows</strong> - expected danger per direction. Follow the green!
+           <br>\u2022 <strong style="color:#88aadd">Info Gain</strong> - should you scan or move?
+           <br>\u2022 <strong style="color:#88aadd">Music</strong> - Markov chain melody, tenser when you're uncertain`,
     math: null,
     highlight: null,
     highlightCanvas: null,
@@ -80,7 +80,7 @@ const STEPS = [
   {
     title: 'Step 7: MLE vs Bayes',
     text: `The orange <strong style="color:#ff8844">\u2717 MLE</strong> marker shows what you'd estimate from
-           <em>just the latest reading</em> — no memory, no prior. It jumps around wildly.
+           <em>just the latest reading</em> - no memory, no prior. It jumps around wildly.
            <br><br>The <strong style="color:#ff5555">heatmap</strong> (Bayesian posterior) is smoother and
            more accurate because it integrates <em>all</em> past observations.
            <br><br>This is why Bayes wins.`,
@@ -90,11 +90,11 @@ const STEPS = [
     action: 'next',
   },
   {
-    title: 'Your Mission',
+    title: 'The Challenge',
     text: `Navigate to the <strong style="color:#ffcc00">EXIT</strong> without stepping on monsters.
            Use the heatmap and EV arrows to make smart decisions.
            <br><br><kbd>\u2190\u2191\u2193\u2192</kbd> Move &nbsp; <kbd>Space</kbd> Scan &nbsp; <kbd>R</kbd> Restart
-           <br><br>Complete levels to unlock harder challenges. Good luck, Bayesian agent.`,
+           <br><br>Complete levels to unlock harder challenges. Good luck!`,
     math: null,
     highlight: null,
     highlightCanvas: null,

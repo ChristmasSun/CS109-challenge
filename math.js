@@ -1,6 +1,4 @@
-/* ============================================================
-   MATH LIBRARY — CS109 Concepts from First Principles
-   ============================================================ */
+/* math library for the CS109 concepts I use here */
 
 export const GRID = 16;
 export const CELLS = GRID * GRID;
