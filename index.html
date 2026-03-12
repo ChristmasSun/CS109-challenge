@@ -310,22 +310,28 @@ function startDemo() {
     const valid = dirs.filter(d => ev[d.name] >= 0);
     if (valid.length === 0) { game.doTurn(0, 0, true); return; }
 
-    // Score each direction: combine EV danger with distance to exit
-    // Lower score = better move
-    const maxEV = Math.max(...valid.map(d => ev[d.name])) || 1;
+    // If any direction has high danger, scan instead
+    const minEV = Math.min(...valid.map(d => ev[d.name]));
+    if (minEV > 0.015) {
+      game.doTurn(0, 0, true);
+      demoScanCount++;
+      return;
+    }
+
+    // Score each direction: heavily avoid danger, gently prefer exit
     for (const d of valid) {
       const nr = pr + d.dr, nc = pc + d.dc;
       const distToExit = Math.abs(nr - exitR) + Math.abs(nc - exitC);
       const curDist = Math.abs(pr - exitR) + Math.abs(pc - exitC);
-      const dangerScore = ev[d.name] / maxEV; // 0-1
-      const progressScore = (distToExit - curDist); // -1 if closer, +1 if farther
+      const progressScore = (distToExit - curDist); // -1 closer, +1 farther
 
       // Penalize revisiting recent cells
       const posKey = nr * 100 + nc;
-      const recentVisits = demoHistory.slice(-6).filter(k => k === posKey).length;
-      const loopPenalty = recentVisits * 2;
+      const recentVisits = demoHistory.slice(-8).filter(k => k === posKey).length;
+      const loopPenalty = recentVisits * 3;
 
-      d.score = dangerScore * 0.4 + progressScore * 0.6 + loopPenalty;
+      // Danger is king — scale it way up
+      d.score = ev[d.name] * 500 + progressScore * 1.0 + loopPenalty;
     }
 
     valid.sort((a, b) => a.score - b.score);

@@ -332,25 +332,26 @@ export class GameState {
   computeScore() {
     const lvlIdx = this.currentLevel;
     const baseTurns = GRID * 2;
-    const turnScore = Math.max(0, 100 - Math.max(0, this.turn - baseTurns) * 1.5);
-    const liveScore = this.lives * 25;
+    const turnScore = Math.max(0, 50 - Math.max(0, this.turn - baseTurns) * 1.0);
+    const liveScore = this.lives * 40;  // 120 max, 0 if dead
+    const hitPenalty = (3 - this.lives) * 15; // extra penalty per hit
     const evRatio = this.moveCount > 0 ? this.evFollowCount / this.moveCount : 0;
-    const evScore = evRatio * 40;
-    const scanBonus = Math.min(15, this.scanCount * 3);
-    const raw = turnScore + liveScore + evScore + scanBonus;
+    const evScore = evRatio * 30;
+    const scanBonus = Math.min(10, this.scanCount * 2);
+    const raw = Math.max(0, turnScore + liveScore + evScore + scanBonus - hitPenalty);
     const multiplier = 1 + lvlIdx * 0.25;
     return Math.round(raw * multiplier);
   }
 
   getGrade(score) {
-    if (score >= 200) return 'S';
-    if (score >= 170) return 'A+';
-    if (score >= 145) return 'A';
-    if (score >= 125) return 'B+';
+    if (score >= 220) return 'S';
+    if (score >= 185) return 'A+';
+    if (score >= 155) return 'A';
+    if (score >= 130) return 'B+';
     if (score >= 105) return 'B';
-    if (score >= 85)  return 'C+';
-    if (score >= 65)  return 'C';
-    if (score >= 40)  return 'D';
+    if (score >= 80)  return 'C+';
+    if (score >= 55)  return 'C';
+    if (score >= 30)  return 'D';
     return 'F';
   }
 
