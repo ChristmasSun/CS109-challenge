@@ -29,7 +29,7 @@ export class GameState {
     const lvl = LEVELS[this.currentLevel] || LEVELS[LEVELS.length - 1];
 
     this.phase = 'TITLE';   // TITLE, TUTORIAL, PLAYING, WON, LOST
-    this.lives = 3;
+    this.lives = 2;
     this.turn = 0;
     this.player = { r: 1, c: 1 };
     this.exit = { r: GRID - 2, c: GRID - 2 };
@@ -127,8 +127,32 @@ export class GameState {
       }
     }
 
-    // Place monsters (scaled by level)
-    for (let m = 0; m < lvl.monsters; m++) {
+    // Place monsters — half near the diagonal path, half random
+    const diagMonsters = Math.ceil(lvl.monsters * 0.5);
+    const randMonsters = lvl.monsters - diagMonsters;
+
+    // Diagonal-biased monsters: placed within 3 cells of the direct path
+    for (let m = 0; m < diagMonsters; m++) {
+      let mr, mc, tries = 0;
+      do {
+        // Pick a random point along the diagonal and offset slightly
+        const t = 0.2 + Math.random() * 0.7; // avoid start/end zones
+        const baseR = Math.round(this.player.r + t * (this.exit.r - this.player.r));
+        const baseC = Math.round(this.player.c + t * (this.exit.c - this.player.c));
+        mr = Math.max(1, Math.min(GRID - 2, baseR + Math.floor(Math.random() * 5) - 2));
+        mc = Math.max(1, Math.min(GRID - 2, baseC + Math.floor(Math.random() * 5) - 2));
+        tries++;
+      } while (tries < 200 && (
+        this.walls.has(mr * GRID + mc) ||
+        dist(mr, mc, this.player.r, this.player.c) < 4 ||
+        dist(mr, mc, this.exit.r, this.exit.c) < 2 ||
+        this.monsters.some(e => e.r === mr && e.c === mc)
+      ));
+      if (tries < 200) this.monsters.push({ r: mr, c: mc });
+    }
+
+    // Remaining monsters: fully random
+    for (let m = 0; m < randMonsters; m++) {
       let mr, mc, tries = 0;
       do {
         mr = 1 + Math.floor(Math.random() * (GRID - 2));
@@ -136,7 +160,7 @@ export class GameState {
         tries++;
       } while (tries < 200 && (
         this.walls.has(mr * GRID + mc) ||
-        dist(mr, mc, this.player.r, this.player.c) < 5 ||
+        dist(mr, mc, this.player.r, this.player.c) < 4 ||
         dist(mr, mc, this.exit.r, this.exit.c) < 2 ||
         this.monsters.some(e => e.r === mr && e.c === mc)
       ));
@@ -333,8 +357,8 @@ export class GameState {
     const lvlIdx = this.currentLevel;
     const baseTurns = GRID * 2;
     const turnScore = Math.max(0, 50 - Math.max(0, this.turn - baseTurns) * 1.0);
-    const liveScore = this.lives * 40;  // 120 max, 0 if dead
-    const hitPenalty = (3 - this.lives) * 15; // extra penalty per hit
+    const liveScore = this.lives * 60;  // 120 max (2 lives), 0 if dead
+    const hitPenalty = (2 - this.lives) * 30; // extra penalty per hit
     const evRatio = this.moveCount > 0 ? this.evFollowCount / this.moveCount : 0;
     const evScore = evRatio * 30;
     const scanBonus = Math.min(10, this.scanCount * 2);
@@ -480,6 +504,12 @@ export class GameState {
     const sigmaMult = isScan ? SCAN_SIGMA_MULT : 1;
     const { reading, sigma } = this.sonarPing(sigmaMult);
     this.update(reading, sigma);
+
+    // Scanning: second reading at half noise for double information
+    if (isScan) {
+      const ping2 = this.sonarPing(SCAN_SIGMA_MULT);
+      this.update(ping2.reading, ping2.sigma);
+    }
 
     // MLE estimate (current observation only, no prior)
     this.mleEstimate = this._computeMLE(reading, sigma);

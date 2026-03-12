@@ -19,7 +19,7 @@ https://fog-of-war-game.vercel.app/
 | M | Mute/unmute the procedural music |
 
 ### Objective
-Navigate from the starting position (top-left region) to the **EXIT** (bottom-right region) without losing all 3 lives. You lose a life each time you step on a cell occupied by a monster.
+Navigate from the starting position (top-left region) to the **EXIT** (bottom-right region) without losing all 2 lives. You lose a life each time you step on a cell occupied by a monster.
 
 ### Core Loop
 Each turn, the following happens:

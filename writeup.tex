@@ -1,0 +1,143 @@
+\documentclass[11pt]{article}
+\usepackage[margin=0.75in]{geometry}
+\usepackage{amsmath, amssymb}
+\usepackage{enumitem}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{graphicx}
+\usepackage{multicol}
+\usepackage{titlesec}
+\usepackage{parskip}
+
+\titlespacing*{\section}{0pt}{8pt}{4pt}
+\titlespacing*{\subsection}{0pt}{6pt}{2pt}
+\setlength{\parskip}{4pt}
+\setlength{\parindent}{0pt}
+
+\title{\vspace{-1.5cm}\textbf{Fog of War: A Bayesian Survival Game}\vspace{-0.3cm}}
+\author{Vedan Desai \\ CS109 Grand Project Challenge}
+\date{}
+
+\begin{document}
+\maketitle
+\vspace{-0.5cm}
+
+\section{Overview}
+
+\textbf{Fog of War} is a turn-based dungeon game where every core mechanic is a probability concept from CS109. The player navigates a $16 \times 16$ grid in fog, avoiding hidden monsters using only a noisy sonar sensor and Bayesian inference. The game is playable at \url{https://fog-of-war-game.vercel.app/}.
+
+The central thesis is that probability \textit{is} the gameplay. Players who understand and use the Bayesian heatmap, expected value arrows, and information gain panel will measurably outperform players who move randomly. The game tracks this quantitatively via an MLE vs.\ Bayes error comparison, demonstrating the power of Bayesian reasoning over frequentist point estimation.
+
+\section{CS109 Concepts and Their Implementation}
+
+\subsection{Bayes' Theorem (Core Mechanic)}
+
+The belief grid is a discrete probability distribution over all $N$ open cells: $P(\text{monster at cell}_i \mid \text{all observations})$. Each turn, it is updated via Bayes' theorem:
+\[
+P(\text{cell}_i \mid z) = \frac{P(\text{cell}_i) \cdot L(z \mid \text{cell}_i)}{\sum_{j=1}^{N} P(\text{cell}_j) \cdot L(z \mid \text{cell}_j)}
+\]
+where $P(\text{cell}_i)$ is the prior (previous turn's belief), $L(z \mid \text{cell}_i)$ is the likelihood of the sensor reading $z$ given a monster at cell $i$, and the denominator normalizes the posterior to sum to 1. This is textbook Bayes applied to a grid of $N$ mutually exclusive hypotheses.
+
+\subsection{Gaussian Distribution (Sensor Model)}
+
+The sonar sensor returns a noisy distance reading:
+\[
+z = d_{\text{true}} + \varepsilon, \quad \varepsilon \sim \mathcal{N}(0, \sigma^2)
+\]
+The likelihood function for each cell is therefore Gaussian:
+\[
+L(\text{cell}_i) = \exp\!\left(-\frac{(d(\text{player}, \text{cell}_i) - z)^2}{2\sigma^2}\right)
+\]
+where $d(\cdot, \cdot)$ is Euclidean distance. This produces a characteristic ring pattern on the heatmap -- cells at distance $\approx z$ from the player receive high likelihood. As $\sigma$ increases across difficulty levels (from 2.0 to 4.0), the ring broadens, making localization harder.
+
+\subsection{Prediction via Convolution}
+
+Monsters move randomly each turn. To account for this, the prediction step convolves the belief grid with a 2D Gaussian kernel $K$:
+\[
+P'(\text{cell}_i) = \sum_{j} P(\text{cell}_j) \cdot K(\text{cell}_i - \text{cell}_j)
+\]
+where $K$ is a $5 \times 5$ Gaussian kernel. This is equivalent to blurring the belief -- probability mass spreads outward, reflecting movement uncertainty. Without prediction, the belief becomes overconfident as monsters drift from their estimated positions.
+
+\subsection{Expected Value (Move Safety)}
+
+Before each move, the game computes expected danger for each direction. For a potential move to cell $(r, c)$:
+\[
+\text{EV}(\text{danger}) = \sum_{\text{cell} \in \mathcal{N}(r,c)} P(\text{cell}) \cdot w(\text{cell})
+\]
+where $w = 3$ for the target cell (direct collision) and $w = 1$ for adjacent cells (monster could move in next turn). The direction with lowest EV is the probabilistically optimal move, displayed as green in the EV panel.
+
+\subsection{Shannon Entropy and Information Gain}
+
+Shannon entropy quantifies total uncertainty of the belief distribution:
+\[
+H = -\sum_{i=1}^{N} P(\text{cell}_i) \cdot \log_2 P(\text{cell}_i)
+\]
+Starting at $\log_2(N)$ bits (uniform prior), entropy decreases as observations concentrate the posterior. The game also computes expected information gain for each action $a$:
+\[
+\text{InfoGain}(a) = H(\text{current belief}) - \mathbb{E}[H(\text{belief after } a)]
+\]
+This reveals the scan-vs-move tradeoff: scanning often yields higher information gain early in the game, but costs a turn of progress toward the exit. The turn limit forces players to balance exploration and exploitation.
+
+\subsection{Beta Distribution (Sensor Reliability)}
+
+A $\text{Beta}(\alpha, \beta)$ distribution tracks sensor reliability over time. After each reading:
+\begin{enumerate}[nosep]
+    \item Compute sensor error $e = |z - d_{\text{true}}|$
+    \item Compute weight $w \in [0,1]$ as the likelihood ratio of the error under a ``good sensor'' model (small-$\sigma$ Gaussian) vs.\ a ``bad sensor'' model
+    \item Update: $\alpha \leftarrow \alpha + w$, \quad $\beta \leftarrow \beta + (1 - w)$
+\end{enumerate}
+A decay factor of 0.995 per turn keeps the distribution adaptive. The posterior mean $\mathbb{E}[p] = \alpha / (\alpha + \beta)$ modulates effective sensor noise, creating a feedback loop: reliable sensors produce sharper likelihood functions and more informative updates.
+
+\subsection{MLE vs.\ Bayesian Inference}
+
+Each turn, two estimates of the nearest monster's position are computed:
+\begin{itemize}[nosep]
+    \item \textbf{MLE:} $\hat{\theta}_{\text{MLE}} = \arg\max_{\text{cell}} L(\text{cell} \mid z)$ -- uses only the current observation
+    \item \textbf{Bayes MAP:} $\hat{\theta}_{\text{MAP}} = \arg\max_{\text{cell}} P(\text{cell} \mid z_{1:t})$ -- integrates all observations
+\end{itemize}
+The game tracks estimation error $\|{\hat{\theta} - \theta_{\text{true}}}\|$ for both methods across all turns. The post-game summary plots cumulative error over time and computes a Bayes advantage percentage, consistently showing 30--50\% lower error for the Bayesian estimate.
+
+\subsection{Central Limit Theorem and Bootstrapping}
+
+After a game ends, the post-game analysis applies bootstrapping to the sensor error measurements $\{e_1, \ldots, e_n\}$:
+\begin{enumerate}[nosep]
+    \item Draw $n$ samples with replacement (one bootstrap replicate)
+    \item Compute the replicate mean $\bar{e}^*$
+    \item Repeat 400 times to obtain a distribution of bootstrap means
+    \item The 2.5th and 97.5th percentiles form the 95\% bootstrap confidence interval
+\end{enumerate}
+The CLT predicts that the distribution of $\bar{e}^*$ converges to $\mathcal{N}(\mu, \sigma^2/n)$ regardless of the underlying error distribution (which is half-normal, not Gaussian). The histogram with fitted Gaussian overlay visually confirms this convergence.
+
+\subsection{Conditional Probability and Markov Chains (Music)}
+
+The procedural music engine is a Markov chain over a 7-note pentatonic scale. Each note's successor is sampled from a row of a transition matrix:
+\[
+P(X_{t+1} = j \mid X_t = i) = T_{ij}, \quad \sum_j T_{ij} = 1
+\]
+Two matrices are defined -- \textit{Calm} (favoring stepwise motion) and \textit{Tense} (favoring jumps and repetition) -- and blended based on the current entropy: $T = (1 - \lambda) \cdot T_{\text{calm}} + \lambda \cdot T_{\text{tense}}$, where $\lambda$ scales with belief entropy. This creates an adaptive soundtrack that reflects the player's epistemic state.
+
+\section{Game Design and Difficulty Scaling}
+
+The game has five levels with increasing difficulty:
+
+\begin{center}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Level} & \textbf{Monsters} & \textbf{Sensor $\sigma$} & \textbf{Turn Limit} & \textbf{Hunter AI} \\
+\midrule
+Training Ground & 4 & 2.0 & 80 & 0\% \\
+The Depths & 6 & 2.5 & 70 & 15\% \\
+Dark Labyrinth & 8 & 3.0 & 65 & 25\% \\
+The Abyss & 10 & 3.5 & 55 & 35\% \\
+Nightmare & 13 & 4.0 & 50 & 50\% \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Hunter monsters bias their movement toward the player with probability equal to the Hunter AI percentage, adding a non-uniform motion model that makes the prediction step less accurate and the game more challenging. The turn limit forces a genuine exploration-exploitation tradeoff -- players cannot simply scan indefinitely.
+
+\section{LLM Disclosure}
+
+Claude (Anthropic) was used extensively as a development partner throughout this project -- for code generation, debugging, math verification, and writing this document. All conceptual design decisions, game mechanics, and the mapping of CS109 concepts to gameplay were developed collaboratively in conversation with the LLM.
+
+\end{document}
