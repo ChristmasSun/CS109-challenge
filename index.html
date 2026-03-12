@@ -251,6 +251,7 @@ document.addEventListener('keydown', (e) => {
 let demoMode = false;
 let demoInterval = null;
 let demoScanCount = 0;
+let demoHistory = []; // track recent positions to avoid loops
 
 function startDemo() {
   audio.init();
@@ -262,8 +263,10 @@ function startDemo() {
   audio.startMusic();
   demoMode = true;
   demoScanCount = 0;
+  demoHistory = [];
 
-  // Auto-play: pick best move every 1.2s
+  const exitR = game.exit.r, exitC = game.exit.c;
+
   demoInterval = setInterval(() => {
     if (game.phase !== 'PLAYING') {
       clearInterval(demoInterval);
@@ -280,19 +283,21 @@ function startDemo() {
       return;
     }
 
-    // Scan first 3 turns, then scan if info gain says so (every ~5 turns)
-    const ig = game.computeInfoGain();
-    const scanGain = ig['Scan'] || 0;
-    const moveGains = [ig['Move Up'] || 0, ig['Move Down'] || 0, ig['Move Left'] || 0, ig['Move Right'] || 0];
-    const maxMoveGain = Math.max(...moveGains);
-
-    if (demoScanCount < 3 || (scanGain > maxMoveGain * 1.3 && game.turn % 5 === 0)) {
+    // Scan first 2 turns to build initial belief
+    if (demoScanCount < 2) {
       game.doTurn(0, 0, true);
       demoScanCount++;
       return;
     }
 
-    // Follow EV: pick lowest danger direction
+    // Occasionally scan (every ~8 turns) if info gain is high
+    if (game.turn > 0 && game.turn % 8 === 0) {
+      game.doTurn(0, 0, true);
+      demoScanCount++;
+      return;
+    }
+
+    const pr = game.player.r, pc = game.player.c;
     const ev = game.computeEV();
     const dirs = [
       { name: 'up',    dr: -1, dc: 0 },
@@ -301,13 +306,34 @@ function startDemo() {
       { name: 'right', dr: 0,  dc: 1 },
     ];
 
-    // Filter out walls, sort by EV (lowest danger first)
+    // Filter walls
     const valid = dirs.filter(d => ev[d.name] >= 0);
     if (valid.length === 0) { game.doTurn(0, 0, true); return; }
-    valid.sort((a, b) => ev[a.name] - ev[b.name]);
 
-    // Bias toward exit (bottom-right) when dangers are similar
+    // Score each direction: combine EV danger with distance to exit
+    // Lower score = better move
+    const maxEV = Math.max(...valid.map(d => ev[d.name])) || 1;
+    for (const d of valid) {
+      const nr = pr + d.dr, nc = pc + d.dc;
+      const distToExit = Math.abs(nr - exitR) + Math.abs(nc - exitC);
+      const curDist = Math.abs(pr - exitR) + Math.abs(pc - exitC);
+      const dangerScore = ev[d.name] / maxEV; // 0-1
+      const progressScore = (distToExit - curDist); // -1 if closer, +1 if farther
+
+      // Penalize revisiting recent cells
+      const posKey = nr * 100 + nc;
+      const recentVisits = demoHistory.slice(-6).filter(k => k === posKey).length;
+      const loopPenalty = recentVisits * 2;
+
+      d.score = dangerScore * 0.4 + progressScore * 0.6 + loopPenalty;
+    }
+
+    valid.sort((a, b) => a.score - b.score);
     const best = valid[0];
+
+    demoHistory.push((pr + best.dr) * 100 + (pc + best.dc));
+    if (demoHistory.length > 20) demoHistory.shift();
+
     game.doTurn(best.dr, best.dc);
   }, 1200);
 }
