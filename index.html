@@ -65,6 +65,7 @@
       <div>
         <button class="start-btn" id="tutorial-btn">Tutorial</button>
         <button class="start-btn" id="start-btn">Play</button>
+        <button class="start-btn" id="demo-btn" style="background:#1a3535;border-color:#258855;color:#66ffaa">Demo</button>
       </div>
     </div>
 
@@ -238,12 +239,89 @@ function nextLevel() {
 
 document.getElementById('start-btn').addEventListener('click', () => startGame(false));
 document.getElementById('tutorial-btn').addEventListener('click', () => startGame(true));
+document.getElementById('demo-btn').addEventListener('click', () => startDemo());
 document.addEventListener('keydown', (e) => {
   if (game.phase === 'TITLE' && (e.key === 'Enter' || e.key === ' ')) {
     e.preventDefault();
     startGame(true);
   }
 });
+
+// --- Demo auto-play mode ---
+let demoMode = false;
+let demoInterval = null;
+let demoScanCount = 0;
+
+function startDemo() {
+  audio.init();
+  game.currentLevel = 0;
+  game.reset();
+  hideOverlay();
+  game.phase = 'PLAYING';
+  game.doTurn(0, 0, true);
+  audio.startMusic();
+  demoMode = true;
+  demoScanCount = 0;
+
+  // Auto-play: pick best move every 1.2s
+  demoInterval = setInterval(() => {
+    if (game.phase !== 'PLAYING') {
+      clearInterval(demoInterval);
+      demoMode = false;
+      if (game.phase === 'WON' || game.phase === 'LOST') {
+        showSummary(game);
+        requestAnimationFrame(() => {
+          const nextBtn = document.getElementById('next-level-btn');
+          if (nextBtn) nextBtn.onclick = () => nextLevel();
+          const retryBtn = document.getElementById('retry-btn');
+          if (retryBtn) retryBtn.onclick = () => restartLevel();
+        });
+      }
+      return;
+    }
+
+    // Scan first 3 turns, then scan if info gain says so (every ~5 turns)
+    const ig = game.computeInfoGain();
+    const scanGain = ig['Scan'] || 0;
+    const moveGains = [ig['Move Up'] || 0, ig['Move Down'] || 0, ig['Move Left'] || 0, ig['Move Right'] || 0];
+    const maxMoveGain = Math.max(...moveGains);
+
+    if (demoScanCount < 3 || (scanGain > maxMoveGain * 1.3 && game.turn % 5 === 0)) {
+      game.doTurn(0, 0, true);
+      demoScanCount++;
+      return;
+    }
+
+    // Follow EV: pick lowest danger direction
+    const ev = game.computeEV();
+    const dirs = [
+      { name: 'up',    dr: -1, dc: 0 },
+      { name: 'down',  dr: 1,  dc: 0 },
+      { name: 'left',  dr: 0,  dc: -1 },
+      { name: 'right', dr: 0,  dc: 1 },
+    ];
+
+    // Filter out walls, sort by EV (lowest danger first)
+    const valid = dirs.filter(d => ev[d.name] >= 0);
+    if (valid.length === 0) { game.doTurn(0, 0, true); return; }
+    valid.sort((a, b) => ev[a.name] - ev[b.name]);
+
+    // Bias toward exit (bottom-right) when dangers are similar
+    const best = valid[0];
+    game.doTurn(best.dr, best.dc);
+  }, 1200);
+}
+
+// Press G to start demo, or use ?demo=1
+document.addEventListener('keydown', (e) => {
+  if ((e.key === 'g' || e.key === 'G') && game.phase === 'TITLE') {
+    e.preventDefault();
+    startDemo();
+  }
+});
+if (new URLSearchParams(window.location.search).has('demo')) {
+  setTimeout(() => startDemo(), 500);
+}
 
 // --- Level display ---
 function updateLevelDisplay() {
